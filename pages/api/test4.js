@@ -1,5 +1,7 @@
 import * as Sentry from "@sentry/nextjs";
 
+import { customWithSentry } from "../../customWithSentry";
+
 async function handler(req, res) {
   try {
     throw new Error("API Test 4");
@@ -13,4 +15,4 @@ async function handler(req, res) {
   res.status(200).json({ name: "John Doe" });
 }
 
-export default Sentry.withSentry(handler);
+export default customWithSentry(handler);
