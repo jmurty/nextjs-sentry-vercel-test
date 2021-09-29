@@ -10,10 +10,9 @@ export const customWithSentry = (handler) => {
     } catch (error) {
       Sentry.captureException(error);
 
-      return new Promise((resolve) => {
+      return new Promise((_, reject) => {
         Sentry.flush(2000).finally(() => {
-          res.status(500).send("Something went wrong");
-          resolve();
+          reject(error);
         });
       });
     }
