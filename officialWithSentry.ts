@@ -27,14 +27,14 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
     const local = domain.create();
     local.add(req);
     local.add(res);
-    console.log('Added local domain', local);
+    console.log('Added local domain');
 
     // `local.bind` causes everything to run inside a domain, just like `local.run` does, but it also lets the callback
     // return a value. In our case, all any of the codepaths return is a promise of `void`, but nextjs still counts on
     // getting that before it will finish the response.
     const boundHandler = local.bind(async () => {
       const currentScope = getCurrentHub().getScope();
-      console.log('Got current scope', currentScope);
+      console.log('Got current scope');
 
       if (currentScope) {
         currentScope.addEventProcessor(event => parseRequest(event, req));
@@ -71,7 +71,7 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
             { request: req },
           );
           currentScope.setSpan(transaction);
-          console.log('Added new transaction to scope', transaction);
+          console.log('Added new transaction to scope');
 
           // save a link to the transaction on the response, so that even if there's an error (landing us outside of
           // the domain), we can still finish it (albeit possibly missing some scope data)
@@ -85,7 +85,7 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
       } catch (e) {
         console.log('Original handler raised error', e);
         if (currentScope) {
-          console.log('Add event processor to current scope', currentScope);
+          console.log('Add event processor to current scope');
           currentScope.addEventProcessor(event => {
             addExceptionMechanism(event, {
               handled: false,
@@ -111,7 +111,7 @@ function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
     const transaction = this.__sentryTransaction;
 
     if (transaction) {
-      console.log('Push transaction.finish to event loop on transaction', transaction);
+      console.log('Push transaction.finish to event loop on transaction');
       transaction.setHttpStatus(this.statusCode);
 
       // Push `transaction.finish` to the next event loop so open spans have a better chance of finishing before the
@@ -119,7 +119,7 @@ function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
       const transactionFinished: Promise<void> = new Promise(resolve => {
         setImmediate(() => {
           transaction.finish();
-          console.log('Finishing (resolving) transaction on event loop', transaction);
+          console.log('Finishing (resolving) transaction on event loop');
           resolve();
         });
       });
