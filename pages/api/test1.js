@@ -1,4 +1,4 @@
-import { withSentry } from "@sentry/nextjs";
+import { withSentry } from "../../officialWithSentry";
 
 const doAsyncWork = () => Promise.reject(new Error("API Test 1"));
 doAsyncWork();

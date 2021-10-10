@@ -1,4 +1,4 @@
-import { withSentry } from "@sentry/nextjs";
+import { withSentry } from "../../officialWithSentry";
 
 function work() {
   throw new Error("API Test 3");
