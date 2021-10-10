@@ -108,6 +108,7 @@ type WrappedResponseEndMethod = AugmentedResponse['end'];
 
 function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
   return async function newEnd(this: AugmentedResponse, ...args: unknown[]) {
+    console.log('Monkeypatched res.end invoked');
     const transaction = this.__sentryTransaction;
 
     if (transaction) {
