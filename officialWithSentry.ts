@@ -1,4 +1,4 @@
-// From https://github.com/getsentry/sentry-javascript/ master brach as of c35aa3b
+// Based on https://github.com/getsentry/sentry-javascript/ master brach as of c35aa3b
 import { captureException, flush, getCurrentHub, Handlers, startTransaction } from '@sentry/node';
 import { extractTraceparentData, hasTracingEnabled } from '@sentry/tracing';
 import { Transaction } from '@sentry/types';
