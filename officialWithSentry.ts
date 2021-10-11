@@ -11,7 +11,7 @@ const { parseRequest } = Handlers;
 // purely for clarity
 type WrappedNextApiHandler = NextApiHandler;
 
-type AugmentedResponse = NextApiResponse & { __sentryTransaction?: Transaction };
+type AugmentedResponse = NextApiResponse & { __sentryTransaction?: Transaction, __flushed?: boolean };
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
@@ -94,6 +94,9 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
           });
           console.log('Capture exception');
           captureException(e);
+
+          console.log('Explicitly call finishTransactionAndFlush');
+          await finishTransactionAndFlush(res);
         }
         throw e;
       }
@@ -103,38 +106,51 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
   };
 };
 
+async function finishTransactionAndFlush(res: AugmentedResponse) {
+  console.log('finishTransactionAndFlush function invoked');
+  const transaction = res.__sentryTransaction;
+
+  if (transaction) {
+    console.log('Push transaction.finish to event loop on transaction');
+    transaction.setHttpStatus(res.statusCode);
+
+    // Push `transaction.finish` to the next event loop so open spans have a better chance of finishing before the
+    // transaction closes, and make sure to wait until that's done before flushing events
+    const transactionFinished: Promise<void> = new Promise((resolve) => {
+      setImmediate(() => {
+        transaction.finish();
+        console.log('Finishing (resolving) transaction on event loop');
+        resolve();
+      });
+    });
+    await transactionFinished;
+  }
+
+  // flush the event queue to ensure that events get sent to Sentry before the response is finished and the lambda
+  // ends
+  try {
+    console.log('Flushing events...');
+    await flush(2000);
+    console.log('Done flushing events');
+  } catch (e) {
+    console.log(`Error while flushing events:\n${e}`);
+  } finally {
+    // Flag response as already finished and flushed, to avoid double-flushing
+    res.__flushed = true;
+  }
+}
+
 type ResponseEndMethod = AugmentedResponse['end'];
 type WrappedResponseEndMethod = AugmentedResponse['end'];
 
 function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
   return async function newEnd(this: AugmentedResponse, ...args: unknown[]) {
     console.log('Monkeypatched res.end invoked');
-    const transaction = this.__sentryTransaction;
 
-    if (transaction) {
-      console.log('Push transaction.finish to event loop on transaction');
-      transaction.setHttpStatus(this.statusCode);
-
-      // Push `transaction.finish` to the next event loop so open spans have a better chance of finishing before the
-      // transaction closes, and make sure to wait until that's done before flushing events
-      const transactionFinished: Promise<void> = new Promise(resolve => {
-        setImmediate(() => {
-          transaction.finish();
-          console.log('Finishing (resolving) transaction on event loop');
-          resolve();
-        });
-      });
-      await transactionFinished;
-    }
-
-    // flush the event queue to ensure that events get sent to Sentry before the response is finished and the lambda
-    // ends
-    try {
-      console.log('Flushing events...');
-      await flush(2000);
-      console.log('Done flushing events');
-    } catch (e) {
-      console.log(`Error while flushing events:\n${e}`);
+    if (this.__flushed) {
+      console.log('Skip already invoked finishTransactionAndFlush');
+    } else {
+      await finishTransactionAndFlush(this);
     }
 
     console.log('Calling original res.end');
