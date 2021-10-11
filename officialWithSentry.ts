@@ -17,7 +17,6 @@ type AugmentedResponse = NextApiResponse & { __sentryTransaction?: Transaction, 
 export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
   return async (req, res) => {
-    console.log('Monkeypatch res.end');
     // first order of business: monkeypatch `res.end()` so that it will wait for us to send events to sentry before it
     // fires (if we don't do this, the lambda will close too early and events will be either delayed or lost)
     // eslint-disable-next-line @typescript-eslint/unbound-method
@@ -27,25 +26,22 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
     const local = domain.create();
     local.add(req);
     local.add(res);
-    console.log('Added local domain');
 
     // `local.bind` causes everything to run inside a domain, just like `local.run` does, but it also lets the callback
     // return a value. In our case, all any of the codepaths return is a promise of `void`, but nextjs still counts on
     // getting that before it will finish the response.
     const boundHandler = local.bind(async () => {
       const currentScope = getCurrentHub().getScope();
-      console.log('Got current scope');
 
       if (currentScope) {
         currentScope.addEventProcessor(event => parseRequest(event, req));
 
         if (hasTracingEnabled()) {
-          console.log('Has tracing enabled');
           // If there is a trace header set, extract the data from it (parentSpanId, traceId, and sampling decision)
           let traceparentData;
           if (req.headers && isString(req.headers['sentry-trace'])) {
             traceparentData = extractTraceparentData(req.headers['sentry-trace'] as string);
-            console.log(`[Tracing] Continuing trace ${traceparentData?.traceId}.`);
+            logger.log(`[Tracing] Continuing trace ${traceparentData?.traceId}.`);
           }
 
           const url = `${req.url}`;
@@ -71,7 +67,6 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
             { request: req },
           );
           currentScope.setSpan(transaction);
-          console.log('Added new transaction to scope');
 
           // save a link to the transaction on the response, so that even if there's an error (landing us outside of
           // the domain), we can still finish it (albeit possibly missing some scope data)
@@ -80,22 +75,19 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
       }
 
       try {
-        console.log('Call original handler');
         return await handler(req, res); // Call original handler
       } catch (e) {
-        console.log('Original handler raised error', e);
         if (currentScope) {
-          console.log('Add event processor to current scope');
           currentScope.addEventProcessor(event => {
             addExceptionMechanism(event, {
               handled: false,
             });
             return event;
           });
-          console.log('Capture exception');
           captureException(e);
 
-          console.log('Explicitly call finishTransactionAndFlush');
+          // Explicitly call function to finish transaction and flush in case the monkeypatched `res.end()` is
+          // never called; it isn't always called for Vercel deployment
           await finishTransactionAndFlush(res);
         }
         throw e;
@@ -107,34 +99,30 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
 };
 
 async function finishTransactionAndFlush(res: AugmentedResponse) {
-  console.log('finishTransactionAndFlush function invoked');
   const transaction = res.__sentryTransaction;
 
   if (transaction) {
-    console.log('Push transaction.finish to event loop on transaction');
     transaction.setHttpStatus(res.statusCode);
 
     // Push `transaction.finish` to the next event loop so open spans have a better chance of finishing before the
     // transaction closes, and make sure to wait until that's done before flushing events
     const transactionFinished: Promise<void> = new Promise((resolve) => {
       setImmediate(() => {
-        console.log('Finishing (resolving) transaction on event loop');
         transaction.finish();
         resolve();
       });
     });
-    console.log('Awaiting transaction.finish');
     await transactionFinished;
   }
 
   // flush the event queue to ensure that events get sent to Sentry before the response is finished and the lambda
   // ends
   try {
-    console.log('Flushing events...');
+    logger.log('Flushing events...');
     await flush(2000);
-    console.log('Done flushing events');
+    logger.log('Done flushing events');
   } catch (e) {
-    console.log(`Error while flushing events:\n${e}`);
+    logger.log(`Error while flushing events:\n${e}`);
   } finally {
     // Flag response as already finished and flushed, to avoid double-flushing
     res.__flushed = true;
@@ -146,15 +134,13 @@ type WrappedResponseEndMethod = AugmentedResponse['end'];
 
 function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
   return async function newEnd(this: AugmentedResponse, ...args: unknown[]) {
-    console.log('Monkeypatched res.end invoked');
 
     if (this.__flushed) {
-      console.log('Skip already invoked finishTransactionAndFlush');
+      logger.log('Skip finish transaction and flush, already done');
     } else {
       await finishTransactionAndFlush(this);
     }
 
-    console.log('Calling original res.end');
     return origEnd.call(this, ...args);
   };
 }
