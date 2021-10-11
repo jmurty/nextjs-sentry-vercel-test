@@ -118,11 +118,12 @@ async function finishTransactionAndFlush(res: AugmentedResponse) {
     // transaction closes, and make sure to wait until that's done before flushing events
     const transactionFinished: Promise<void> = new Promise((resolve) => {
       setImmediate(() => {
-        transaction.finish();
         console.log('Finishing (resolving) transaction on event loop');
+        transaction.finish();
         resolve();
       });
     });
+    console.log('Awaiting transaction.finish');
     await transactionFinished;
   }
 
