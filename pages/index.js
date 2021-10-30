@@ -21,6 +21,39 @@ export default function Home() {
           Throw error, trigger Sentry
         </button>
 
+        <button
+          type="button"
+          onClick={() => {
+            fetch("/api/test1")
+          }}
+        >
+          Invoke api/test1
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            fetch("/api/test2")
+          }}
+        >
+          Invoke api/test2
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            fetch("/api/test3")
+          }}
+        >
+          Invoke api/test3
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            fetch("/api/test4")
+          }}
+        >
+          Invoke api/test4
+        </button>
+
         <h1 className={styles.title}>
           Welcome to <a href="https://nextjs.org">Next.js!</a>
         </h1>
