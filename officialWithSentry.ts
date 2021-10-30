@@ -1,4 +1,3 @@
-// Based on https://github.com/getsentry/sentry-javascript/ master brach as of c35aa3b
 import { captureException, flush, getCurrentHub, Handlers, startTransaction } from '@sentry/node';
 import { extractTraceparentData, hasTracingEnabled } from '@sentry/tracing';
 import { Transaction } from '@sentry/types';
@@ -11,7 +10,7 @@ const { parseRequest } = Handlers;
 // purely for clarity
 type WrappedNextApiHandler = NextApiHandler;
 
-type AugmentedResponse = NextApiResponse & { __sentryTransaction?: Transaction, __flushed?: boolean };
+type AugmentedResponse = NextApiResponse & { __sentryTransaction?: Transaction; __flushed?: boolean };
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
@@ -20,7 +19,8 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
     // first order of business: monkeypatch `res.end()` so that it will wait for us to send events to sentry before it
     // fires (if we don't do this, the lambda will close too early and events will be either delayed or lost)
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    res.end = wrapEndMethod(res.end);
+    // res.end = wrapEndMethod(res.end);
+    res.once("finish", () => finishTransactionAndFlush(res));
 
     // use a domain in order to prevent scope bleed between requests
     const local = domain.create();
@@ -80,6 +80,7 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
         if (currentScope) {
           currentScope.addEventProcessor(event => {
             addExceptionMechanism(event, {
+              mechanism: 'withSentry',
               handled: false,
             });
             return event;
@@ -88,7 +89,7 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
 
           // Explicitly call function to finish transaction and flush in case the monkeypatched `res.end()` is
           // never called; it isn't always called for Vercel deployment
-          await finishTransactionAndFlush(res);
+          // await finishTransactionAndFlush(res);
         }
         throw e;
       }
@@ -98,7 +99,7 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
   };
 };
 
-async function finishTransactionAndFlush(res: AugmentedResponse) {
+async function finishTransactionAndFlush(res: AugmentedResponse): Promise<void> {
   const transaction = res.__sentryTransaction;
 
   if (transaction) {
@@ -106,7 +107,7 @@ async function finishTransactionAndFlush(res: AugmentedResponse) {
 
     // Push `transaction.finish` to the next event loop so open spans have a better chance of finishing before the
     // transaction closes, and make sure to wait until that's done before flushing events
-    const transactionFinished: Promise<void> = new Promise((resolve) => {
+    const transactionFinished: Promise<void> = new Promise(resolve => {
       setImmediate(() => {
         transaction.finish();
         resolve();
@@ -125,22 +126,22 @@ async function finishTransactionAndFlush(res: AugmentedResponse) {
     logger.log(`Error while flushing events:\n${e}`);
   } finally {
     // Flag response as already finished and flushed, to avoid double-flushing
+    // TODO Set at beginning of this function to better avoid double runs?
     res.__flushed = true;
   }
 }
 
-type ResponseEndMethod = AugmentedResponse['end'];
-type WrappedResponseEndMethod = AugmentedResponse['end'];
+// type ResponseEndMethod = AugmentedResponse['end'];
+// type WrappedResponseEndMethod = AugmentedResponse['end'];
 
-function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
-  return async function newEnd(this: AugmentedResponse, ...args: unknown[]) {
+// function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
+//   return async function newEnd(this: AugmentedResponse, ...args: unknown[]) {
+//     if (this.__flushed) {
+//       logger.log('Skip finish transaction and flush, already done');
+//     } else {
+//       await finishTransactionAndFlush(this);
+//     }
 
-    if (this.__flushed) {
-      logger.log('Skip finish transaction and flush, already done');
-    } else {
-      await finishTransactionAndFlush(this);
-    }
-
-    return origEnd.call(this, ...args);
-  };
-}
+//     return origEnd.call(this, ...args);
+//   };
+// }
