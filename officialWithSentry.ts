@@ -20,7 +20,16 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
     // fires (if we don't do this, the lambda will close too early and events will be either delayed or lost)
     // eslint-disable-next-line @typescript-eslint/unbound-method
     // res.end = wrapEndMethod(res.end);
-    res.once("finish", () => finishTransactionAndFlush(res));
+    res.once("finish", () => {
+      console.log("finish called");
+      finishTransactionAndFlush(res)
+    });
+    res.once("drain", () => {
+      console.log("drain called");
+    });
+    res.once("close", () => {
+      console.log("close called");
+    });
 
     // use a domain in order to prevent scope bleed between requests
     const local = domain.create();
@@ -77,6 +86,7 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
       try {
         return await handler(req, res); // Call original handler
       } catch (e) {
+        console.log("Caught exception: currentScope", currentScope);
         if (currentScope) {
           currentScope.addEventProcessor(event => {
             addExceptionMechanism(event, {
@@ -101,6 +111,7 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
 
 async function finishTransactionAndFlush(res: AugmentedResponse): Promise<void> {
   const transaction = res.__sentryTransaction;
+  console.log("finishTransactionAndFlush: transaction", transaction);
 
   if (transaction) {
     transaction.setHttpStatus(res.statusCode);
