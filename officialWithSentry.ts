@@ -19,15 +19,18 @@ export const withSentry = (handler: NextApiHandler): WrappedNextApiHandler => {
     // first order of business: monkeypatch `res.end()` so that it will wait for us to send events to sentry before it
     // fires (if we don't do this, the lambda will close too early and events will be either delayed or lost)
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    // res.end = wrapEndMethod(res.end);
-    res.once("finish", () => {
+    res.end = wrapEndMethod(res.end);
+    res.destroy = (error?: Error): void => {
+      console.log("destroy invoked");
+    }
+    res.on("finish", () => {
       console.log("finish called");
       finishTransactionAndFlush(res)
     });
-    res.once("drain", () => {
+    res.on("drain", () => {
       console.log("drain called");
     });
-    res.once("close", () => {
+    res.on("close", () => {
       console.log("close called");
     });
 
@@ -142,17 +145,17 @@ async function finishTransactionAndFlush(res: AugmentedResponse): Promise<void> 
   }
 }
 
-// type ResponseEndMethod = AugmentedResponse['end'];
-// type WrappedResponseEndMethod = AugmentedResponse['end'];
+type ResponseEndMethod = AugmentedResponse['end'];
+type WrappedResponseEndMethod = AugmentedResponse['end'];
 
-// function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
-//   return async function newEnd(this: AugmentedResponse, ...args: unknown[]) {
-//     if (this.__flushed) {
-//       logger.log('Skip finish transaction and flush, already done');
-//     } else {
-//       await finishTransactionAndFlush(this);
-//     }
+function wrapEndMethod(origEnd: ResponseEndMethod): WrappedResponseEndMethod {
+  return async function newEnd(this: AugmentedResponse, ...args: unknown[]) {
+    if (this.__flushed) {
+      logger.log('Skip finish transaction and flush, already done');
+    } else {
+      await finishTransactionAndFlush(this);
+    }
 
-//     return origEnd.call(this, ...args);
-//   };
-// }
+    return origEnd.call(this, ...args);
+  };
+}
